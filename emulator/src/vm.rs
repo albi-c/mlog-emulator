@@ -278,4 +278,8 @@ impl VM {
         }
         Ok(VmFinishReason::InsLimit)
     }
+
+    pub fn into_print_buffer(self) -> PrintBuffer {
+        self.print_buffer
+    }
 }

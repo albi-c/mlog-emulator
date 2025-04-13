@@ -5,13 +5,13 @@ use serde::{Deserialize, Serialize};
 use crate::building::{Building, MessageBuilding};
 use crate::vm::{VmError, VmFinishReason, VM};
 
-#[derive(Debug, Deserialize)]
-enum Device {
+#[derive(Debug, Clone, Deserialize)]
+pub enum Device {
     Message,
 }
 
 impl Device {
-    fn construct(self, name: String) -> (Rc<dyn Building>, Box<dyn FnOnce() -> DeviceState>) {
+    pub fn construct(self, name: String) -> (Rc<dyn Building>, Box<dyn FnOnce() -> DeviceState>) {
         match self {
             Device::Message => {
                 let dev = Rc::new(MessageBuilding::new(name));
@@ -22,31 +22,32 @@ impl Device {
 }
 
 #[derive(Debug, Deserialize)]
-struct Options {
-    code: String,
-    code_len_limit: Option<usize>,
-    instruction_limit: Option<usize>,
-    end_on_wrap: bool,
-    devices: HashMap<String, Device>,
+pub struct Options {
+    pub code: String,
+    pub code_len_limit: Option<usize>,
+    pub instruction_limit: Option<usize>,
+    pub end_on_wrap: bool,
+    pub devices: HashMap<String, Device>,
 }
 
 #[derive(Debug, Serialize)]
-enum DeviceState {
+pub enum DeviceState {
     Message(String),
 }
 
 #[derive(Debug, Serialize)]
-enum ErrorPos {
+pub enum ErrorPos {
     Instruction(usize),
     None,
     PcFetch
 }
 
 #[derive(Debug, Serialize)]
-enum Output {
+pub enum Output {
     Success {
         finish_reason: VmFinishReason,
         devices: HashMap<String, DeviceState>,
+        print_buffer: String,
     },
     Failure {
         pos: ErrorPos,
@@ -54,9 +55,7 @@ enum Output {
     },
 }
 
-pub fn run_from_json(input: impl Read, output: impl Write) {
-    let options: Options = serde_json::from_reader(input).unwrap();
-
+pub fn run_from_options(options: Options) -> Output {
     let mut devices = vec![];
     let mut device_state_getters = vec![];
     for (name, device) in options.devices {
@@ -70,13 +69,14 @@ pub fn run_from_json(input: impl Read, output: impl Write) {
         options.code_len_limit.unwrap_or(VM::DEFAULT_CODE_LEN_LIMIT),
         devices,
     ).unwrap();
-    let result = match vm.run(options.instruction_limit, options.end_on_wrap) {
+    match vm.run(options.instruction_limit, options.end_on_wrap) {
         Ok(finish_reason) => Output::Success {
             finish_reason,
             devices: device_state_getters
                 .into_iter()
                 .map(|(name, getter)| (name, getter()))
                 .collect(),
+            print_buffer: vm.into_print_buffer().take(),
         },
         Err(err) => Output::Failure {
             pos: match &err.1 {
@@ -88,7 +88,11 @@ pub fn run_from_json(input: impl Read, output: impl Write) {
             },
             msg: err.to_string(),
         },
-    };
+    }
+}
 
+pub fn run_from_json(input: impl Read, output: impl Write) {
+    let options: Options = serde_json::from_reader(input).unwrap();
+    let result = run_from_options(options);
     serde_json::to_writer(output, &result).unwrap();
 }
