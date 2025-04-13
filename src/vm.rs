@@ -2,6 +2,7 @@ use std::cell::RefCell;
 use std::fmt::{Display, Formatter};
 use std::rc::Rc;
 use std::string::ToString;
+use serde::Serialize;
 use crate::building::{Building, ProcessorBuilding};
 use crate::instruction::Instruction;
 use crate::value::{Property, Value};
@@ -26,7 +27,7 @@ pub enum VmError {
 }
 
 #[derive(Debug)]
-pub struct PosVmError(VmError, Option<usize>);
+pub struct PosVmError(pub VmError, pub Option<usize>);
 
 pub type VmResult<T> = Result<T, VmError>;
 pub type PosVmResult<T> = Result<T, PosVmError>;
@@ -105,7 +106,7 @@ pub struct VmCycleResult {
     pub halt: bool,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub enum VmFinishReason {
     PcWrap,
     Halt,
