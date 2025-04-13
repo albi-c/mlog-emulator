@@ -132,8 +132,9 @@ impl Value {
 
     pub fn as_int(&self) -> VmResult<i64> {
         let num = self.as_num()?;
-        if (num.round() - num).abs() < f64::EPSILON {
-            Ok(num as i64)
+        let rounded = num.round();
+        if (rounded - num).abs() < f64::EPSILON {
+            Ok(rounded as i64)
         } else {
             Err(self._invalid_cast("int"))
         }

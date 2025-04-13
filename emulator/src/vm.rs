@@ -249,14 +249,18 @@ impl VM {
             Err(err) => return Err(err.to_pc_res().to_pos()),
         };
         if pc < 0 {
-            return Err(VmError::NegativeIndex(pc, "program counter").to_pos());
+            return Err(VmError::NegativeIndex(pc, "program counter").to_pc_res().to_pos());
         }
-        let (pc, pc_wrap): (usize, bool) = if pc >= self.code.len() as i64 {
-            (0, true)
-        } else {
-            (pc as usize, false)
+        let pc = pc as usize;
+        if pc >= self.code.len() {
+            return Err(
+                VmError::IndexTooHigh(pc, self.code.len(), "program counter").to_pc_res().to_pos());
+        }
+        let (new_pc, pc_wrap) = match pc + 1 {
+            new_pc if new_pc >= self.code.len() => (0, true),
+            new_pc => (new_pc, false),
         };
-        self.pc_handle.set(&self.variables, num!(pc as f64 + 1.)).unwrap();
+        self.pc_handle.set(&self.variables, num!(new_pc as f64)).unwrap();
         match self.code[pc].execute(&self.variables, &self.print_buffer,
                                     &self.buildings, self.pc_handle) {
             Ok(res) => Ok(VmCycleResult {
