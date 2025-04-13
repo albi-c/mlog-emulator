@@ -15,9 +15,8 @@ printflush message1
 "#;
 
 fn main() {
-    let mut vm = VM::new(CODE).unwrap();
+    let mut vm = VM::new(CODE, VM::DEFAULT_CODE_LEN_LIMIT).unwrap();
     let message1 = vm.building(MessageBuilding::new("message1".to_string())).unwrap();
-    println!("{:#?}", vm);
     for _ in 0..1000 {
         vm.cycle().unwrap();
     }

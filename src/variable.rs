@@ -61,56 +61,80 @@ impl Variable {
         self.value.is_null()
     }
 
-    fn _invalid_cast(&self, to: &'static str) -> VmError {
-        VmError::InvalidCast(self.name.to_string(), self.type_name(), to)
-    }
-
     pub fn as_num(&self) -> VmResult<f64> {
-        self.value.as_num().map_err(
-            |_| self._invalid_cast("num"))
+        self.value.as_num()
     }
 
     pub fn as_str(&self) -> VmResult<&Rc<LazyUtf16String>> {
-        self.value.as_str().map_err(
-            |_| self._invalid_cast("str"))
+        self.value.as_str()
     }
 
     pub fn as_building(&self) -> VmResult<&Rc<dyn Building>> {
-        self.value.as_building().map_err(
-            |_| self._invalid_cast("Building"))
+        self.value.as_building()
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct VarHandle(usize);
+
+impl VarHandle {
+    pub fn get(self, vars: &Variables) -> &Variable {
+        &vars.variables[self.0]
+    }
+    pub fn val(self, vars: &Variables) -> &Value {
+        self.get(vars).val()
+    }
+    pub fn set(self, vars: &mut Variables, value: Value) -> VmResult<()> {
+        *vars.variables[self.0].val_mut()? = value;
+        Ok(())
     }
 }
 
 #[derive(Debug)]
 pub struct Variables {
-    variables: HashMap<Rc<String>, Variable>,
+    variables: Vec<Variable>,
+    by_name: HashMap<String, usize>,
 }
 
 impl Variables {
-    pub fn get(&self, name: &String) -> VmResult<&Variable> {
-        self.variables.get(name).ok_or_else(|| VmError::VariableNotFound(name.to_string()))
-    }
-    pub fn set(&mut self, name: Rc<String>, value: Value) -> VmResult<()> {
-        match self.variables.entry(name.clone()) {
-            Occupied(entry) => {
-                *entry.into_mut().val_mut()? = value;
-                Ok(())
-            },
-            Vacant(entry) => {
-                entry.insert(Variable::new(name, value));
-                Ok(())
-            },
+    pub fn handle(&mut self, name: &str) -> VarHandle {
+        if let Some(idx) = self.by_name.get(name) {
+            VarHandle(*idx)
+        } else {
+            let name = Rc::new(name.clone());
+            let idx = self.variables.len();
+            self.by_name.insert(name.to_string(), idx);
+            self.variables.push(Variable::new(Rc::new(name.to_string()), Value::Null));
+            VarHandle(idx)
         }
     }
-    pub fn insert(&mut self, name: &str, value: Value) -> VmResult<()> {
-        self.set(Rc::new(name.to_string()), value)
+    
+    pub fn get_handle(&self, name: &str) -> Option<VarHandle> {
+        self.by_name.get(name).map(|idx| VarHandle(*idx))
+    }
+
+    pub fn insert(&mut self, name: String, var: Variable) -> VarHandle {
+        match self.by_name.entry(name) {
+            Occupied(entry) => panic!("Double insert: {}", entry.key()),
+            Vacant(entry) => {
+                let idx = self.variables.len();
+                entry.insert(idx);
+                self.variables.push(var);
+                VarHandle(idx)
+            },
+        }
     }
 }
 
-impl<const N: usize> From<[(Rc<String>, Variable); N]> for Variables {
-    fn from(value: [(Rc<String>, Variable); N]) -> Self {
-        Variables {
-            variables: HashMap::from(value),
+impl<const N: usize> From<[(&str, Variable); N]> for Variables {
+    fn from(value: [(&str, Variable); N]) -> Self {
+        let mut vars = Variables {
+            variables: vec![],
+            by_name: HashMap::new(),
+        };
+        for (name, var) in value {
+            vars.insert(name.to_string(), var);
         }
+        vars
     }
 }

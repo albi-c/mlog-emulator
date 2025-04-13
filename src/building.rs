@@ -42,13 +42,19 @@ impl Building for ProcessorBuilding {
 
     fn read(&self, index: Value) -> VmResult<Value> {
         let index = index.as_str()?;
-        self.variables.upgrade().unwrap().borrow()
-            .get(index.as_string_ref()).map(|var| var.val().clone())
+        let vars = self.variables.upgrade().unwrap();
+        let vars = vars.borrow();
+        vars.get_handle(index.as_string_ref())
+            .ok_or_else(|| VmError::VariableNotFound(index.to_string()))
+            .map(|h| h.val(&vars).clone())
     }
     fn write(&self, index: Value, value: Value) -> VmResult<()> {
         let index = index.as_str()?;
-        self.variables.upgrade().unwrap().borrow_mut()
-            .set(index.clone_string(), value)
+        let vars = self.variables.upgrade().unwrap();
+        let mut vars = vars.borrow_mut();
+        vars.get_handle(index.as_string_ref())
+            .ok_or_else(|| VmError::VariableNotFound(index.to_string()))
+            .map(|h| h.set(&mut vars, value))?
     }
 }
 
