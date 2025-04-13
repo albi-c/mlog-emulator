@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::fmt::{Display, Formatter};
 use std::rc::Rc;
 use std::string::ToString;
@@ -14,6 +15,11 @@ pub enum VmError {
     ConstantMutation(String),
     EmptyCode,
     CodeTooLong(usize, usize),
+    InvalidCharacter(u16),
+    NegativeIndex(i64, &'static str),
+    IndexTooHigh(usize, usize, &'static str),
+    PcResError(Box<VmError>),
+    InvalidFormat(String),
 }
 
 #[derive(Debug)]
@@ -31,6 +37,10 @@ impl VmError {
         PosVmError(self, Some(pos))
     }
 
+    pub fn to_pc_res(self) -> VmError {
+        VmError::PcResError(Box::new(self))
+    }
+
     fn print(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             VmError::InvalidCast(value, from, to) =>
@@ -44,13 +54,26 @@ impl VmError {
                 write!(f, "Program is empty"),
             VmError::CodeTooLong(len, limit) =>
                 write!(f, "Program has too many instructions ({} > {})", len, limit),
+            VmError::InvalidCharacter(ch) =>
+                write!(f, "Invalid UTF-16 character: {}", ch),
+            VmError::NegativeIndex(idx, device) =>
+                write!(f, "Negative index ({}) for {}", idx, device),
+            VmError::IndexTooHigh(idx, limit, device) =>
+                write!(f, "Index out of range ({} >= {}) for {}", idx, limit, device),
+            VmError::PcResError(err) =>
+                err.print(f),
+            VmError::InvalidFormat(msg) =>
+                write!(f, "Invalid format - {}", msg),
         }
     }
 }
 
 impl Display for VmError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Error: ")?;
+        match self {
+            VmError::PcResError(_) => write!(f, "Error during program counter resolution: ")?,
+            _ => write!(f, "Error: ")?,
+        }
         self.print(f)
     }
 }
@@ -68,23 +91,66 @@ impl Display for PosVmError {
 }
 
 #[derive(Debug)]
+pub struct VmCycleResult {
+    pub pc_wrap: bool,
+    pub halt: bool,
+}
+
+#[derive(Debug)]
+pub enum VmFinishReason {
+    PcWrap,
+    Halt,
+    InsLimit,
+}
+
+#[derive(Debug)]
+pub struct PrintBuffer {
+    string: RefCell<String>,
+}
+
+impl PrintBuffer {
+    pub fn new() -> Self {
+        PrintBuffer {
+            string: RefCell::new("".to_string())
+        }
+    }
+
+    pub fn write(&self, string: &str) {
+        self.string.borrow_mut().push_str(string);
+    }
+
+    pub fn write_utf_16(&self, ch: u16) -> VmResult<()> {
+        self.write(&String::from_utf16(&[ch]).map_err(|_| VmError::InvalidCharacter(ch))?);
+        Ok(())
+    }
+
+    pub fn format(&self, _string: &str) -> VmResult<()> {
+        Err(VmError::InvalidFormat("not implemented".to_string()))
+    }
+
+    pub fn take(&self) -> String {
+        self.string.replace("".to_string())
+    }
+}
+
+#[derive(Debug)]
 pub struct VM {
     handle_counter: VarHandle,
-    handle_links: VarHandle,
     variables: Rc<Variables>,
     code: Vec<Instruction>,
-    print_buffer: String,
+    print_buffer: PrintBuffer,
+    buildings: Vec<Rc<dyn Building>>,
 }
 
 macro_rules! builtin {
     ($name:expr, $val:expr) => {
         {
-            ($name, Variable::new_const(Rc::new($name.to_string()), $val, true))
+            ($name, Variable::new_const($name.to_string(), $val, true))
         }
     };
     ($name:expr, $val:expr, $constant:expr) => {
         {
-            ($name, Variable::new_const(Rc::new($name.to_string()), $val, $constant))
+            ($name, Variable::new_const($name.to_string(), $val, $constant))
         }
     }
 }
@@ -131,10 +197,10 @@ impl VM {
             builtin!("itemCount", num!()),
             builtin!("liquidCount", num!()),
         ]);
-        for building in buildings {
+        for building in &buildings {
             vars.insert(building.name().to_string(),
-                        Variable::new_const(Rc::new(building.name().to_string()),
-                                            Value::Building(building), true));
+                        Variable::new_const(building.name().to_string(),
+                                            Value::Building(building.clone()), true));
         }
         let code = code.split("\n").filter_map(|ln| Instruction::parse(ln, &mut vars)).collect::<Vec<_>>();
         if code.is_empty() {
@@ -145,10 +211,10 @@ impl VM {
         }
         let vm = VM {
             handle_counter: vars.get_handle("@counter").unwrap(),
-            handle_links: vars.get_handle("@links").unwrap(),
             variables: Rc::new(vars),
             code,
-            print_buffer: "".to_string(),
+            print_buffer: PrintBuffer::new(),
+            buildings,
         };
         vm.variables.get_handle("@this").unwrap().force_set(&vm.variables, Value::Building(
             Rc::new(ProcessorBuilding::new("@this".to_string(), Rc::downgrade(&vm.variables)))));
@@ -161,20 +227,38 @@ impl VM {
             .map(|h| h.val(&self.variables).clone())
     }
 
-    pub fn cycle(&mut self) -> PosVmResult<()> {
-        let pc = match self.handle_counter.get(&self.variables).as_num() {
+    pub fn cycle(&self) -> PosVmResult<VmCycleResult> {
+        let pc = match self.handle_counter.get(&self.variables).as_int() {
             Ok(pc) => pc,
-            Err(err) => return Err(err.to_pos()),
-        } as i64;
-        let pc: usize = if pc < 0 || pc >= self.code.len() as i64 {
-            0
+            Err(err) => return Err(err.to_pc_res().to_pos()),
+        };
+        if pc < 0 {
+            return Err(VmError::NegativeIndex(pc, "program counter").to_pos());
+        }
+        let (pc, pc_wrap): (usize, bool) = if pc >= self.code.len() as i64 {
+            (0, true)
         } else {
-            pc as usize
+            (pc as usize, false)
         };
         self.handle_counter.set(&self.variables, num!(pc as f64 + 1.)).unwrap();
-        match self.code[pc].execute(&self.variables, &mut self.print_buffer) {
-            Ok(_) => Ok(()),
+        match self.code[pc].execute(&self.variables, &self.print_buffer, &self.buildings) {
+            Ok(res) => Ok(VmCycleResult {
+                pc_wrap,
+                halt: res.halt,
+            }),
             Err(err) => Err(err.with_pos(pc)),
         }
+    }
+
+    pub fn run(&self, limit: Option<usize>, end_on_wrap: bool) -> PosVmResult<VmFinishReason> {
+        for _ in 0..limit.unwrap_or(usize::MAX) {
+            let res = self.cycle()?;
+            if res.halt {
+                return Ok(VmFinishReason::Halt);
+            } else if res.pc_wrap && end_on_wrap {
+                return Ok(VmFinishReason::PcWrap);
+            }
+        }
+        Ok(VmFinishReason::InsLimit)
     }
 }

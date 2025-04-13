@@ -1,8 +1,9 @@
 use std::rc::Rc;
 use std::str::FromStr;
+use crate::building::Building;
 use crate::value::Value;
 use crate::variable::{VarHandle, Variables};
-use crate::vm::VmResult;
+use crate::vm::{PrintBuffer, VmResult};
 
 #[derive(Debug)]
 pub enum ValueArg {
@@ -30,14 +31,33 @@ impl ValueArg {
 }
 
 #[derive(Debug)]
-pub enum Instruction {
-    Set(VarHandle, ValueArg),
-    Print(ValueArg),
-    PrintFlush(ValueArg),
+pub struct InstructionExecuteResult {
+    pub halt: bool,
 }
 
-macro_rules! va {
-    ($vars:expr, $arg:expr) => (ValueArg::parse($arg, $vars));
+#[derive(Debug)]
+pub enum Instruction {
+    Read(VarHandle, ValueArg, ValueArg),
+    Write(ValueArg, ValueArg, ValueArg),
+    Print(ValueArg),
+    PrintChar(ValueArg),
+    Format(ValueArg),
+
+    Set(VarHandle, ValueArg),
+
+    PrintFlush(ValueArg),
+    GetLink(VarHandle, ValueArg),
+}
+
+macro_rules! arg {
+    (out, $vars:expr, $arg:expr) => ($vars.handle($arg));
+    (in, $vars:expr, $arg:expr) => (ValueArg::parse($arg, $vars));
+}
+
+macro_rules! ins {
+    ($ins:ident, $vars:expr, $args:expr => $($sel:tt $i:expr),*) => {
+        Instruction::$ins($(arg!($sel, $vars, $args[$i])),*)
+    };
 }
 
 impl Instruction {
@@ -67,29 +87,59 @@ impl Instruction {
     }
 
     pub fn parse(line: &str, vars: &mut Variables) -> Option<Self> {
-        let spl = Self::split_line(line);
-        if spl.is_empty() {
+        let args = Self::split_line(line);
+        if args.is_empty() {
             return None;
         }
-        Some(match spl[0] {
-            "set" => Instruction::Set(vars.handle(spl[1]), va!(vars, spl[2])),
-            "print" => Instruction::Print(va!(vars, spl[1])),
-            "printflush" => Instruction::PrintFlush(va!(vars, spl[1])),
+        Some(match args[0] {
+            "read" => ins!(Read, vars, args => out 1, in 2, in 2),
+            "write" => ins!(Write, vars, args => in 1, in 2, in 3),
+            "print" => ins!(Print, vars, args => in 1),
+            "printchar" => ins!(PrintChar, vars, args => in 1),
+            "format" => ins!(Format, vars, args => in 1),
+
+            "set" => ins!(Set, vars, args => out 1, in 2),
+
+            "printflush" => ins!(PrintFlush, vars, args => in 1),
+            "getlink" => ins!(GetLink, vars, args => out 1, in 2),
+
             name => panic!("Invalid instruction: '{}'", name),
         })
     }
 
-    pub fn execute(&self, vars: &Variables, print_buffer: &mut String) -> VmResult<()> {
+    pub fn execute(&self, vars: &Variables, print_buffer: &PrintBuffer,
+                   buildings: &[Rc<dyn Building>]) -> VmResult<InstructionExecuteResult> {
         match self {
+            Instruction::Read(dst, src, idx) => {
+                let src = src.eval(vars)?;
+                let idx = idx.eval(vars)?;
+                dst.set(vars, if let Ok(string) = src.as_str() {
+                    Value::Num(idx.do_index_copy(string.as_utf_16(), "string")? as f64)
+                } else {
+                    src.as_building()?.read(idx)?
+                })?
+            },
+            Instruction::Write(src, dst, idx) =>
+                dst.eval(vars)?.as_building()?.write(idx.eval(vars)?, src.eval(vars)?)?,
+            Instruction::Print(val) =>
+                print_buffer.write(&val.eval(vars)?.to_string()),
+            Instruction::PrintChar(val) =>
+                print_buffer.write_utf_16(val.eval(vars)?.as_int()? as u16)?,
+            Instruction::Format(val) =>
+                print_buffer.format(&val.eval(vars)?.to_string())?,
+
             Instruction::Set(dst, src) =>
                 dst.set(vars, src.eval(vars)?)?,
-            Instruction::Print(val) =>
-                print_buffer.push_str(&val.eval(vars)?.to_string()),
+
             Instruction::PrintFlush(val) =>
-                val.eval(vars)?.as_building()?.print_flush(
-                    std::mem::replace(print_buffer, "".to_string()))?,
+                val.eval(vars)?.as_building()?.print_flush(print_buffer.take())?,
+            Instruction::GetLink(dst, idx) =>
+                dst.set(vars, Value::Building(
+                    idx.eval(vars)?.do_index(buildings, "get link")?.clone()))?,
         }
-        Ok(())
+        Ok(InstructionExecuteResult {
+            halt: false,
+        })
     }
 }
 

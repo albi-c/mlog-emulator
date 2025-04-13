@@ -8,13 +8,13 @@ use crate::vm::{VmError, VmResult};
 
 #[derive(Debug)]
 pub struct Variable {
-    name: Rc<String>,
+    name: String,
     value: UnsafeCell<Value>,
     constant: bool,
 }
 
 impl Variable {
-    pub fn new_const(name: Rc<String>, value: Value, constant: bool) -> Self {
+    pub fn new_const(name: String, value: Value, constant: bool) -> Self {
         Variable {
             name,
             value: UnsafeCell::new(value),
@@ -22,7 +22,7 @@ impl Variable {
         }
     }
 
-    pub fn new(name: Rc<String>, value: Value) -> Self {
+    pub fn new(name: String, value: Value) -> Self {
         Self::new_const(name, value, false)
     }
 
@@ -51,7 +51,7 @@ impl Variable {
         self.constant
     }
 
-    pub fn clone_as(&self, name: Rc<String>) -> Self {
+    pub fn clone_as(&self, name: String) -> Self {
         Self::new_const(name, self.val(), self.constant)
     }
 
@@ -69,6 +69,10 @@ impl Variable {
 
     pub fn as_num(&self) -> VmResult<f64> {
         unsafe { self.value.as_ref_unchecked() }.as_num()
+    }
+
+    pub fn as_int(&self) -> VmResult<i64> {
+        unsafe { self.value.as_ref_unchecked() }.as_int()
     }
 
     pub fn as_str(&self) -> VmResult<Rc<LazyUtf16String>> {
@@ -109,10 +113,9 @@ impl Variables {
         if let Some(idx) = self.by_name.get(name) {
             VarHandle(*idx)
         } else {
-            let name = Rc::new(name.clone());
             let idx = self.variables.len();
             self.by_name.insert(name.to_string(), idx);
-            self.variables.push(Variable::new(Rc::new(name.to_string()), Value::Null));
+            self.variables.push(Variable::new(name.to_string(), Value::Null));
             VarHandle(idx)
         }
     }

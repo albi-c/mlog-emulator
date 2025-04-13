@@ -113,6 +113,35 @@ impl Value {
         }
     }
 
+    pub fn as_int(&self) -> VmResult<i64> {
+        let num = self.as_num()?;
+        if (num.round() - num).abs() < f64::EPSILON {
+            Ok(num as i64)
+        } else {
+            Err(self._invalid_cast("int"))
+        }
+    }
+
+    pub fn as_index(&self, len: usize, device: &'static str) -> VmResult<usize> {
+        let val = self.as_int()?;
+        if val < 0 {
+            return Err(VmError::NegativeIndex(val, device));
+        }
+        let val = val as usize;
+        if val >= len {
+            return Err(VmError::IndexTooHigh(val, len, device));
+        }
+        Ok(val)
+    }
+
+    pub fn do_index<'a, T>(&self, data: &'a [T], device: &'static str) -> VmResult<&'a T> {
+        Ok(&data[self.as_index(data.len(), device)?])
+    }
+    
+    pub fn do_index_copy<T: Copy>(&self, data: &[T], device: &'static str) -> VmResult<T> {
+        Ok(data[self.as_index(data.len(), device)?])
+    }
+
     pub fn as_str(&self) -> VmResult<Rc<LazyUtf16String>> {
         match self {
             Value::Str(string) => Ok(string.clone()),
