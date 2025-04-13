@@ -5,7 +5,7 @@ use std::rc::Rc;
 use crate::building::Building;
 use crate::vm::{VmError, VmResult};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Eq, PartialEq)]
 pub struct LazyUtf16String {
     string: Rc<String>,
     utf_16: OnceCell<Vec<u16>>,
@@ -80,12 +80,28 @@ impl Display for LazyUtf16String {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Copy, Clone, Eq, PartialEq)]
+pub struct Property(&'static str);
+
+impl Property {
+    pub const PROPERTIES: &'static [&'static str] = &["memoryCapacity", "size"];
+
+    pub fn new(name: &'static str) -> Self {
+        Property(name)
+    }
+
+    pub fn name(self) -> &'static str {
+        self.0
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
 pub enum Value {
     Null,
     Num(f64),
     Str(Rc<LazyUtf16String>),
     Building(Rc<dyn Building>),
+    Property(Property),
 }
 
 impl Value {
@@ -95,6 +111,7 @@ impl Value {
             Value::Num(_) => "num",
             Value::Str(_) => "str",
             Value::Building(_) => "Building",
+            Value::Property(_) => "Property",
         }
     }
 
@@ -137,7 +154,7 @@ impl Value {
     pub fn do_index<'a, T>(&self, data: &'a [T], device: &'static str) -> VmResult<&'a T> {
         Ok(&data[self.as_index(data.len(), device)?])
     }
-    
+
     pub fn do_index_copy<T: Copy>(&self, data: &[T], device: &'static str) -> VmResult<T> {
         Ok(data[self.as_index(data.len(), device)?])
     }
@@ -155,6 +172,24 @@ impl Value {
             _ => Err(self._invalid_cast("Building")),
         }
     }
+
+    pub fn as_property(&self) -> VmResult<Property> {
+        match self {
+            Value::Property(property) => Ok(*property),
+            _ => Err(self._invalid_cast("Property")),
+        }
+    }
+
+    pub fn sense(&self, property: Property) -> VmResult<Value> {
+        match self {
+            Value::Str(string) => if property.name() == "size" {
+                return Ok(Value::Num(string.as_utf_16().len() as f64));
+            },
+            Value::Building(building) => return building.sense(property),
+            _ => {},
+        }
+        Ok(Value::Null)
+    }
 }
 
 impl Display for Value {
@@ -164,6 +199,7 @@ impl Display for Value {
             Value::Num(num) => write!(f, "{}", num),
             Value::Str(string) => write!(f, "{}", string),
             Value::Building(building) => write!(f, "{}", building.name()),
+            Value::Property(property) => write!(f, "@{}", property.name()),
         }
     }
 }

@@ -4,7 +4,7 @@ use std::rc::Rc;
 use std::string::ToString;
 use crate::building::{Building, ProcessorBuilding};
 use crate::instruction::Instruction;
-use crate::value::Value;
+use crate::value::{Property, Value};
 use crate::variable::{VarHandle, Variable, Variables};
 
 #[derive(Debug)]
@@ -20,6 +20,9 @@ pub enum VmError {
     IndexTooHigh(usize, usize, &'static str),
     PcResError(Box<VmError>),
     InvalidFormat(String),
+    NoProperty(String, &'static str, &'static str),
+    InvalidOperation(String),
+    DivisionByZero,
 }
 
 #[derive(Debug)]
@@ -64,6 +67,12 @@ impl VmError {
                 err.print(f),
             VmError::InvalidFormat(msg) =>
                 write!(f, "Invalid format - {}", msg),
+            VmError::NoProperty(value, type_, prop) =>
+                write!(f, "Value '{}' of type '{}' has no property '{}'", value, type_, prop),
+            VmError::InvalidOperation(op) =>
+                write!(f, "Invalid operation: '{}'", op),
+            VmError::DivisionByZero =>
+                write!(f, "Division by zero"),
         }
     }
 }
@@ -135,7 +144,7 @@ impl PrintBuffer {
 
 #[derive(Debug)]
 pub struct VM {
-    handle_counter: VarHandle,
+    pc_handle: VarHandle,
     variables: Rc<Variables>,
     code: Vec<Instruction>,
     print_buffer: PrintBuffer,
@@ -197,12 +206,18 @@ impl VM {
             builtin!("itemCount", num!()),
             builtin!("liquidCount", num!()),
         ]);
+        for name in Property::PROPERTIES {
+            let var_name = "@".to_string() + name;
+            vars.insert(var_name.clone(), Variable::new_const(
+                var_name, Value::Property(Property::new(name)), true));
+        }
         for building in &buildings {
             vars.insert(building.name().to_string(),
                         Variable::new_const(building.name().to_string(),
                                             Value::Building(building.clone()), true));
         }
-        let code = code.split("\n").filter_map(|ln| Instruction::parse(ln, &mut vars)).collect::<Vec<_>>();
+        let code = code.split("\n")
+            .filter_map(|ln| Instruction::parse(ln, &mut vars)).collect::<Vec<_>>();
         if code.is_empty() {
             return Err(VmError::EmptyCode);
         }
@@ -210,7 +225,7 @@ impl VM {
             return Err(VmError::CodeTooLong(code.len(), code_len_limit));
         }
         let vm = VM {
-            handle_counter: vars.get_handle("@counter").unwrap(),
+            pc_handle: vars.get_handle("@counter").unwrap(),
             variables: Rc::new(vars),
             code,
             print_buffer: PrintBuffer::new(),
@@ -228,7 +243,7 @@ impl VM {
     }
 
     pub fn cycle(&self) -> PosVmResult<VmCycleResult> {
-        let pc = match self.handle_counter.get(&self.variables).as_int() {
+        let pc = match self.pc_handle.get(&self.variables).as_int() {
             Ok(pc) => pc,
             Err(err) => return Err(err.to_pc_res().to_pos()),
         };
@@ -240,8 +255,9 @@ impl VM {
         } else {
             (pc as usize, false)
         };
-        self.handle_counter.set(&self.variables, num!(pc as f64 + 1.)).unwrap();
-        match self.code[pc].execute(&self.variables, &self.print_buffer, &self.buildings) {
+        self.pc_handle.set(&self.variables, num!(pc as f64 + 1.)).unwrap();
+        match self.code[pc].execute(&self.variables, &self.print_buffer,
+                                    &self.buildings, self.pc_handle) {
             Ok(res) => Ok(VmCycleResult {
                 pc_wrap,
                 halt: res.halt,

@@ -1,7 +1,7 @@
 use std::cell::RefCell;
 use std::fmt::Debug;
 use std::rc::Weak;
-use crate::value::Value;
+use crate::value::{Property, Value};
 use crate::variable::Variables;
 use crate::vm::{VmError, VmResult};
 
@@ -18,7 +18,18 @@ pub trait Building : Debug {
     fn write(&self, _index: Value, _value: Value) -> VmResult<()> {
         Err(VmError::InvalidBuildingType("write into", self.name().to_string()))
     }
+
+    fn sense(&self, _property: Property) -> VmResult<Value> {
+        Err(VmError::InvalidBuildingType("sense from", self.name().to_string()))
+    }
 }
+
+impl PartialEq for dyn Building {
+    fn eq(&self, other: &Self) -> bool {
+        self.name() == other.name()
+    }
+}
+impl Eq for dyn Building {}
 
 #[derive(Debug)]
 pub struct ProcessorBuilding {
