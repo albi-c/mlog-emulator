@@ -1,4 +1,3 @@
-use std::cell::RefCell;
 use std::fmt::{Display, Formatter};
 use std::rc::Rc;
 use std::string::ToString;
@@ -72,7 +71,7 @@ impl Display for PosVmError {
 pub struct VM {
     handle_counter: VarHandle,
     handle_links: VarHandle,
-    variables: Rc<RefCell<Variables>>,
+    variables: Rc<Variables>,
     code: Vec<Instruction>,
     print_buffer: String,
 }
@@ -102,14 +101,15 @@ macro_rules! null {
 impl VM {
     pub const DEFAULT_CODE_LEN_LIMIT: usize = 1000;
 
-    pub fn new(code: &str, code_len_limit: usize) -> VmResult<Self> {
+    pub fn new(code: &str, code_len_limit: usize, buildings: Vec<Rc<dyn Building>>) -> VmResult<Self> {
         let mut vars = Variables::from([
             builtin!("@counter", num!(), false),
+            builtin!("@this", null!()),
             builtin!("@thisx", num!()),
             builtin!("@thisy", num!()),
             builtin!("@ipt", num!(1000.)),
             builtin!("@timescale", num!(1.)),
-            builtin!("@links", num!()),
+            builtin!("@links", num!(buildings.len() as f64)),
             builtin!("@unit", null!(), false),
             builtin!("@time", num!()),
             builtin!("@tick", num!()),
@@ -131,6 +131,11 @@ impl VM {
             builtin!("itemCount", num!()),
             builtin!("liquidCount", num!()),
         ]);
+        for building in buildings {
+            vars.insert(building.name().to_string(),
+                        Variable::new_const(Rc::new(building.name().to_string()),
+                                            Value::Building(building), true));
+        }
         let code = code.split("\n").filter_map(|ln| Instruction::parse(ln, &mut vars)).collect::<Vec<_>>();
         if code.is_empty() {
             return Err(VmError::EmptyCode);
@@ -141,36 +146,23 @@ impl VM {
         let vm = VM {
             handle_counter: vars.get_handle("@counter").unwrap(),
             handle_links: vars.get_handle("@links").unwrap(),
-            variables: Rc::new(RefCell::new(vars)),
+            variables: Rc::new(vars),
             code,
             print_buffer: "".to_string(),
         };
-        let this_handle = vm.variables.borrow_mut().handle("@this");
-        this_handle.set(&mut vm.variables.borrow_mut(), Value::Building(Rc::new(
-            ProcessorBuilding::new("@this".to_string(), Rc::downgrade(&vm.variables)))))?;
+        vm.variables.get_handle("@this").unwrap().force_set(&vm.variables, Value::Building(
+            Rc::new(ProcessorBuilding::new("@this".to_string(), Rc::downgrade(&vm.variables)))));
         Ok(vm)
     }
 
     pub fn get_val(&self, name: &str) -> VmResult<Value> {
-        let vars = self.variables.borrow();
-        vars.get_handle(name)
+        self.variables.get_handle(name)
             .ok_or_else(|| VmError::VariableNotFound(name.to_string()))
-            .map(|h| h.val(&vars).clone())
-    }
-
-    pub fn building<T: Building + 'static>(&mut self, building: T) -> VmResult<Rc<T>> {
-        let mut vars = self.variables.borrow_mut();
-        let new_val = num!(self.handle_counter.get(&vars).as_num()? + 1.);
-        self.handle_counter.set(&mut vars, new_val)?;
-        let building = Rc::new(building);
-        vars.handle(building.name())
-            .set(&mut vars, Value::Building(building.clone()))
-            .map(|_| building)
+            .map(|h| h.val(&self.variables).clone())
     }
 
     pub fn cycle(&mut self) -> PosVmResult<()> {
-        let mut vars = self.variables.borrow_mut();
-        let pc = match self.handle_counter.get(&vars).as_num() {
+        let pc = match self.handle_counter.get(&self.variables).as_num() {
             Ok(pc) => pc,
             Err(err) => return Err(err.to_pos()),
         } as i64;
@@ -179,8 +171,8 @@ impl VM {
         } else {
             pc as usize
         };
-        self.handle_counter.set(&mut vars, num!(pc as f64 + 1.)).unwrap();
-        match self.code[pc].execute(&mut vars, &mut self.print_buffer) {
+        self.handle_counter.set(&self.variables, num!(pc as f64 + 1.)).unwrap();
+        match self.code[pc].execute(&self.variables, &mut self.print_buffer) {
             Ok(_) => Ok(()),
             Err(err) => Err(err.with_pos(pc)),
         }

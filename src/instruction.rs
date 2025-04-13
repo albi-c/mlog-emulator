@@ -21,9 +21,9 @@ impl ValueArg {
         }
     }
 
-    pub fn eval<'a>(&'a self, vars: &'a Variables) -> VmResult<&'a Value> {
+    pub fn eval(&self, vars: &Variables) -> VmResult<Value> {
         Ok(match self {
-            ValueArg::Value(val) => val,
+            ValueArg::Value(val) => val.clone(),
             ValueArg::Variable(var) => var.val(vars),
         })
     }
@@ -79,10 +79,10 @@ impl Instruction {
         })
     }
 
-    pub fn execute(&self, vars: &mut Variables, print_buffer: &mut String) -> VmResult<()> {
+    pub fn execute(&self, vars: &Variables, print_buffer: &mut String) -> VmResult<()> {
         match self {
             Instruction::Set(dst, src) =>
-                dst.set(vars, src.eval(vars)?.clone())?,
+                dst.set(vars, src.eval(vars)?)?,
             Instruction::Print(val) =>
                 print_buffer.push_str(&val.eval(vars)?.to_string()),
             Instruction::PrintFlush(val) =>

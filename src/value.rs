@@ -113,16 +113,16 @@ impl Value {
         }
     }
 
-    pub fn as_str(&self) -> VmResult<&Rc<LazyUtf16String>> {
+    pub fn as_str(&self) -> VmResult<Rc<LazyUtf16String>> {
         match self {
-            Value::Str(string) => Ok(string),
+            Value::Str(string) => Ok(string.clone()),
             _ => Err(self._invalid_cast("str")),
         }
     }
 
-    pub fn as_building(&self) -> VmResult<&Rc<dyn Building>> {
+    pub fn as_building(&self) -> VmResult<Rc<dyn Building>> {
         match self {
-            Value::Building(building) => Ok(building),
+            Value::Building(building) => Ok(building.clone()),
             _ => Err(self._invalid_cast("Building")),
         }
     }

@@ -23,11 +23,11 @@ pub trait Building : Debug {
 #[derive(Debug)]
 pub struct ProcessorBuilding {
     name: String,
-    variables: Weak<RefCell<Variables>>,
+    variables: Weak<Variables>,
 }
 
 impl ProcessorBuilding {
-    pub fn new(name: String, variables: Weak<RefCell<Variables>>) -> Self {
+    pub fn new(name: String, variables: Weak<Variables>) -> Self {
         ProcessorBuilding {
             name,
             variables,
@@ -43,7 +43,6 @@ impl Building for ProcessorBuilding {
     fn read(&self, index: Value) -> VmResult<Value> {
         let index = index.as_str()?;
         let vars = self.variables.upgrade().unwrap();
-        let vars = vars.borrow();
         vars.get_handle(index.as_string_ref())
             .ok_or_else(|| VmError::VariableNotFound(index.to_string()))
             .map(|h| h.val(&vars).clone())
@@ -51,10 +50,9 @@ impl Building for ProcessorBuilding {
     fn write(&self, index: Value, value: Value) -> VmResult<()> {
         let index = index.as_str()?;
         let vars = self.variables.upgrade().unwrap();
-        let mut vars = vars.borrow_mut();
         vars.get_handle(index.as_string_ref())
             .ok_or_else(|| VmError::VariableNotFound(index.to_string()))
-            .map(|h| h.set(&mut vars, value))?
+            .map(|h| h.set(&vars, value))?
     }
 }
 

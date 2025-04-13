@@ -1,3 +1,4 @@
+use std::cell::UnsafeCell;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -8,7 +9,7 @@ use crate::vm::{VmError, VmResult};
 #[derive(Debug)]
 pub struct Variable {
     name: Rc<String>,
-    value: Value,
+    value: UnsafeCell<Value>,
     constant: bool,
 }
 
@@ -16,7 +17,7 @@ impl Variable {
     pub fn new_const(name: Rc<String>, value: Value, constant: bool) -> Self {
         Variable {
             name,
-            value,
+            value: UnsafeCell::new(value),
             constant,
         }
     }
@@ -29,16 +30,21 @@ impl Variable {
         &self.name
     }
 
-    pub fn val(&self) -> &Value {
-        &self.value
+    pub fn val(&self) -> Value {
+        unsafe { self.value.as_ref_unchecked() }.clone()
     }
 
-    pub fn val_mut(&mut self) -> VmResult<&mut Value> {
+    pub fn set_val(&self, value: Value) -> VmResult<()> {
         if self.constant {
             Err(VmError::ConstantMutation(self.name.to_string()))
         } else {
-            Ok(&mut self.value)
+            unsafe { self.value.replace(value) };
+            Ok(())
         }
+    }
+
+    pub fn force_set_val(&self, value: Value) {
+        unsafe { self.value.replace(value) };
     }
 
     pub fn constant(&self) -> bool {
@@ -46,31 +52,31 @@ impl Variable {
     }
 
     pub fn clone_as(&self, name: Rc<String>) -> Self {
-        Self::new_const(name, self.value.clone(), self.constant)
+        Self::new_const(name, self.val(), self.constant)
     }
 
     pub fn into_value(self) -> Value {
-        self.value
+        self.value.into_inner()
     }
 
     pub fn type_name(&self) -> &'static str {
-        self.value.type_name()
+        unsafe { self.value.as_ref_unchecked() }.type_name()
     }
 
     pub fn is_null(&self) -> bool {
-        self.value.is_null()
+        unsafe { self.value.as_ref_unchecked() }.is_null()
     }
 
     pub fn as_num(&self) -> VmResult<f64> {
-        self.value.as_num()
+        unsafe { self.value.as_ref_unchecked() }.as_num()
     }
 
-    pub fn as_str(&self) -> VmResult<&Rc<LazyUtf16String>> {
-        self.value.as_str()
+    pub fn as_str(&self) -> VmResult<Rc<LazyUtf16String>> {
+        unsafe { self.value.as_ref_unchecked() }.as_str()
     }
 
-    pub fn as_building(&self) -> VmResult<&Rc<dyn Building>> {
-        self.value.as_building()
+    pub fn as_building(&self) -> VmResult<Rc<dyn Building>> {
+        unsafe { self.value.as_ref_unchecked() }.as_building()
     }
 }
 
@@ -81,12 +87,14 @@ impl VarHandle {
     pub fn get(self, vars: &Variables) -> &Variable {
         &vars.variables[self.0]
     }
-    pub fn val(self, vars: &Variables) -> &Value {
+    pub fn val(self, vars: &Variables) -> Value {
         self.get(vars).val()
     }
-    pub fn set(self, vars: &mut Variables, value: Value) -> VmResult<()> {
-        *vars.variables[self.0].val_mut()? = value;
-        Ok(())
+    pub fn set(self, vars: &Variables, value: Value) -> VmResult<()> {
+        vars.variables[self.0].set_val(value)
+    }
+    pub fn force_set(self, vars: &Variables, value: Value) {
+        vars.variables[self.0].force_set_val(value);
     }
 }
 
@@ -108,7 +116,7 @@ impl Variables {
             VarHandle(idx)
         }
     }
-    
+
     pub fn get_handle(&self, name: &str) -> Option<VarHandle> {
         self.by_name.get(name).map(|idx| VarHandle(*idx))
     }
