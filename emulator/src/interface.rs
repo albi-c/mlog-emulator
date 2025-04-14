@@ -2,12 +2,13 @@ use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::rc::Rc;
 use serde::{Deserialize, Serialize};
-use crate::building::{Building, MessageBuilding};
+use crate::building::{Building, MemoryBuilding, MessageBuilding};
 use crate::vm::{VmError, VmFinishReason, VM};
 
 #[derive(Debug, Clone, Deserialize)]
 pub enum Device {
     Message,
+    Memory(usize),
 }
 
 impl Device {
@@ -17,6 +18,10 @@ impl Device {
                 let dev = Rc::new(MessageBuilding::new(name));
                 (dev.clone(), Box::new(move || DeviceState::Message(dev.get_text())))
             },
+            Device::Memory(capacity) => {
+                let dev = Rc::new(MemoryBuilding::new(name, capacity));
+                (dev.clone(), Box::new(move || DeviceState::Memory(dev.get_data())))
+            }
         }
     }
 }
@@ -27,12 +32,13 @@ pub struct Options {
     pub code_len_limit: Option<usize>,
     pub instruction_limit: Option<usize>,
     pub end_on_wrap: bool,
-    pub devices: HashMap<String, Device>,
+    pub devices: Vec<(String, Device)>,
 }
 
 #[derive(Debug, Serialize)]
 pub enum DeviceState {
     Message(String),
+    Memory(Box<[f64]>),
 }
 
 #[derive(Debug, Serialize)]

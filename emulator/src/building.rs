@@ -96,3 +96,38 @@ impl Building for MessageBuilding {
         Ok(())
     }
 }
+
+#[derive(Debug)]
+pub struct MemoryBuilding {
+    name: String,
+    data: RefCell<Box<[f64]>>,
+}
+
+impl MemoryBuilding {
+    pub fn new(name: String, capacity: usize) -> Self {
+        MemoryBuilding {
+            name,
+            data: RefCell::new(vec![0.; capacity].into_boxed_slice()),
+        }
+    }
+
+    pub fn get_data(&self) -> Box<[f64]> {
+        self.data.clone().into_inner()
+    }
+}
+
+impl Building for MemoryBuilding {
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn read(&self, index: Value) -> VmResult<Value> {
+        index.do_index_copy(&self.data.borrow(), "memory cell").map(Value::Num)
+    }
+    fn write(&self, index: Value, value: Value) -> VmResult<()> {
+        let idx = index.as_index(self.data.borrow().len(), "memory cell")?;
+        let val = value.as_num()?;
+        self.data.borrow_mut()[idx] = val;
+        Ok(())
+    }
+}

@@ -8,6 +8,7 @@ use emulator::vm::VmFinishReason;
 #[derive(Debug, Clone)]
 enum Device {
     Message(),
+    Memory(usize),
 }
 
 #[pyclass]
@@ -21,8 +22,11 @@ enum FinishReason {
 #[pyclass]
 #[derive(Debug, Clone)]
 enum DeviceState {
-    Message{
+    Message {
         text: String,
+    },
+    Memory {
+        data: Vec<f64>,
     },
 }
 
@@ -59,7 +63,7 @@ struct Executor {
     instruction_limit: Option<usize>,
     #[pyo3(set)]
     end_on_wrap: bool,
-    devices: HashMap<String, interface::Device>,
+    devices: Vec<(String, interface::Device)>,
 }
 
 impl Executor {
@@ -83,14 +87,15 @@ impl Executor {
             code_len_limit: None,
             instruction_limit: None,
             end_on_wrap: true,
-            devices: HashMap::new(),
+            devices: vec![],
         }
     }
 
     pub fn add_device(&mut self, name: String, device: Device) {
-        self.devices.insert(name, match device {
+        self.devices.push((name, match device {
             Device::Message() => interface::Device::Message,
-        });
+            Device::Memory(capacity) => interface::Device::Memory(capacity),
+        }));
     }
 
     pub fn execute(&mut self) -> ExecutionResult {
@@ -103,6 +108,8 @@ impl Executor {
                 },
                 devices: devices.into_iter().map(|(k, v)| (k, match v {
                     interface::DeviceState::Message(text) => DeviceState::Message { text },
+                    interface::DeviceState::Memory(data) =>
+                        DeviceState::Memory { data: data.to_vec() },
                 })).collect(),
                 print_buffer,
             },

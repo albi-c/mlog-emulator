@@ -1,4 +1,4 @@
-#![feature(unsafe_cell_access)]
+#![feature(unsafe_cell_access, random)]
 
 pub mod vm;
 pub mod value;

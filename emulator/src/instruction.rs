@@ -1,3 +1,4 @@
+use std::random::random;
 use std::rc::Rc;
 use std::str::FromStr;
 use strum_macros::EnumString;
@@ -77,6 +78,7 @@ pub enum Operator {
     Asin,
     Acos,
     Atan,
+    Rand,
 }
 
 #[derive(Debug)]
@@ -316,6 +318,8 @@ impl Instruction {
                     Operator::Asin => unary!(vars, a, fn |a: f64| a.asin().to_degrees()),
                     Operator::Acos => unary!(vars, a, fn |a: f64| a.acos().to_degrees()),
                     Operator::Atan => unary!(vars, a, fn |a: f64| a.atan().to_degrees()),
+                    Operator::Rand => unary!(vars, a,
+                        fn |a: f64| random::<u32>() as f64 / u32::MAX as f64 * a),
                 })?,
 
             Instruction::Wait(time) => {
