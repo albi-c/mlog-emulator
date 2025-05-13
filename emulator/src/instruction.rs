@@ -79,6 +79,7 @@ pub enum Operator {
     Acos,
     Atan,
     Rand,
+    Sign,
 }
 
 #[derive(Debug)]
@@ -320,6 +321,8 @@ impl Instruction {
                     Operator::Atan => unary!(vars, a, fn |a: f64| a.atan().to_degrees()),
                     Operator::Rand => unary!(vars, a,
                         fn |a: f64| random::<u32>() as f64 / u32::MAX as f64 * a),
+                    Operator::Sign => unary!(vars, a,
+                        fn |a: f64| if a > 0. { 1. } else if a < 0. { -1. } else { 0. }),
                 })?,
 
             Instruction::Wait(time) => {
