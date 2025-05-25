@@ -188,6 +188,7 @@ macro_rules! unary {
 
 impl Instruction {
     fn split_line(line: &str) -> Vec<&str> {
+        let line = line.trim();
         let mut segments = vec![];
         let mut start = 0;
         let mut next_start = false;
